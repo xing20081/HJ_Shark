@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DJMax Clone</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            z-index: -1;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: transparent;
+            position: relative;
+            z-index: 1;
+        }
+
+        .effect {
+            position: absolute;
+            width: 70px; /* Matches the hit zone width */
+            pointer-events: none;
+            animation: fadeOut 0.5s ease-out forwards;
+        }
+
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: scaleY(1.5);
+            }
+        }
+
+        .keyLabel {
+            position: absolute;
+            color: white;
+            font-size: 14px;
+            text-align: center;
+            width: 70px;
+        }
+
+        /* 버튼 스타일 */
+        #startButton {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px;
+            font-size: 24px;
+            background-color: #333;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            z-index: 2;  /* 게임 요소 위에 표시되도록 */
+        }
+
+        #startButton:hover {
+            background-color: #555;
+        }
+    </style>
+</head>
+<body>
+    <iframe 
+        src="https://www.youtube.com/embed/W2Mx-MraDdI?autoplay=1&mute=1&loop=1&playlist=W2Mx-MraDdI" 
+        allow="autoplay; encrypted-media" 
+        allowfullscreen>
+    </iframe>
+
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const keys = ['q', 'w', 'e', 'r'];
+        const keyColors = ['red', 'yellow', 'green', 'blue'];
+        const lanes = [200, 300, 400, 500];
+        const hitZoneWidth = 70;
+        const hitZoneHeight = 30;
+        const barHeight = hitZoneHeight;
+
+        let notes = [];
+        let score = 0;
+        let gameRunning = false;
+
+        const schoolBellNotes = [
+            { lane: 0, time: 000, frequency: 587.33 },  // E4 레
+            { lane: 0, time: 500, frequency: 587.33 },  // E4 레
+            { lane: 1, time: 500, frequency: 659.25 }, // D4 미
+            { lane: 2, time: 300, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+
+            { lane: 0, time: 500, frequency: 587.33 },  // E4 레
+            { lane: 1, time: 500, frequency: 659.25 }, // D4 미
+            { lane: 2, time: 300, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+
+            { lane: 0, time: 500, frequency: 587.33 },  // E4 레
+            { lane: 1, time: 500, frequency: 659.25 }, // D4 미
+            { lane: 2, time: 300, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+            { lane: 2, time: 250, frequency: 784 },   // G4 솔
+
+            { lane: 3, time: 500, frequency: 740 },   // F#4 파#
+            { lane: 3, time: 500, frequency: 740 },   // F#4 파#
+
+        ];
+
+        let lastTime = 0; // 마지막 업데이트 시간
+        let noteTimeOffset = 0; // 노트 타임 오프셋 (초기화)
+
+        // 오디오 재생 함수
+        function playTone(frequency, duration) {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.start();
+            setTimeout(() => {
+                oscillator.stop();
+                audioCtx.close();
+            }, duration);
+        }
+
+        // 성공 사운드
+        function playSuccessSound(frequency) {
+            playTone(frequency, 200);
+        }
+
+        // 효과 생성 함수
+        function createEffect(x, y, color, heightMultiplier = 1) {
+            const effect = document.createElement('div');
+            effect.className = 'effect';
+            effect.style.backgroundColor = color;
+            effect.style.left = `${x}px`;
+            effect.style.top = `${y}px`;
+            effect.style.height = `${hitZoneHeight * heightMultiplier}px`;
+            document.body.appendChild(effect);
+
+            setTimeout(() => effect.remove(), 500);
+        }
+
+        // 노트 생성 함수
+        function createNote() {
+            const note = schoolBellNotes.shift();
+            if (note) {
+                notes.push({
+                    x: lanes[note.lane],
+                    y: -barHeight,
+                    lane: note.lane,
+                    frequency: note.frequency
+                });
+                setTimeout(createNote, note.time);
+            }
+        }
+
+        // 노트 업데이트 함수 (deltaTime을 사용하여 속도 조정)
+        function updateNotes(deltaTime) {
+            notes.forEach(note => {
+                note.y += 300 * deltaTime;  // deltaTime을 사용하여 이동 속도 조정
+                if (note.y > canvas.height) {
+                    notes = notes.filter(n => n !== note);  // 화면 밖으로 나간 노트 제거
+                }
+            });
+        }
+
+        // 노트 그리기
+        function drawNotes() {
+            notes.forEach(note => {
+                ctx.fillStyle = keyColors[note.lane];
+                ctx.fillRect(note.x - hitZoneWidth / 2, note.y, hitZoneWidth, barHeight);
+            });
+        }
+
+        // 레인 그리기
+        function drawLanes() {
+            lanes.forEach((lane, index) => {
+                const laneTop = canvas.height - 100 - hitZoneHeight;
+
+                ctx.fillStyle = keyColors[index];
+                ctx.fillRect(lane - hitZoneWidth / 2, laneTop, hitZoneWidth, hitZoneHeight);
+
+                ctx.fillStyle = 'white';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(keys[index].toUpperCase(), lane, laneTop + hitZoneHeight + 15);
+            });
+        }
+
+        // 키 입력 체크
+        function checkHit(key) {
+            const keyIndex = keys.indexOf(key);
+            if (keyIndex !== -1) {
+                for (let i = 0; i < notes.length; i++) {
+                    const distance = Math.abs(notes[i].y - (canvas.height - 100));
+                    if (
+                        notes[i].lane === keyIndex &&
+                        distance < hitZoneHeight * 2
+                    ) {
+                        let effectHeight = 1;
+
+                        if (distance < hitZoneHeight / 2) {
+                            effectHeight = 3;
+                        } else if (distance < hitZoneHeight) {
+                            effectHeight = 2;
+                        }
+
+                        createEffect(lanes[keyIndex] - hitZoneWidth / 2, canvas.height - 100 - hitZoneHeight * effectHeight, keyColors[keyIndex], effectHeight);
+                        playSuccessSound(notes[i].frequency);
+                        notes.splice(i, 1);
+                        score += 10;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // 게임 루프
+        function gameLoop(timestamp) {
+            if (!gameRunning) return;
+
+            const deltaTime = (timestamp - lastTime) / 1000; // deltaTime 계산 (초 단위)
+            lastTime = timestamp;
+
+            // 화면 지우기
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 노트 업데이트
+            updateNotes(deltaTime);
+
+            // 노트 및 레인 그리기
+            drawLanes();
+            drawNotes();
+
+            // 점수 표시
+            ctx.fillStyle = 'white';
+            ctx.fillText(`Score: ${score}`, 10, 20);
+
+            requestAnimationFrame(gameLoop); // 애니메이션 프레임 요청
+        }
+
+        // 키 입력 이벤트
+        document.addEventListener('keydown', e => {
+            if (gameRunning && keys.includes(e.key)) {
+                checkHit(e.key);
+            }
+        });
+
+        // 게임 시작 함수
+        function startGame() {
+            gameRunning = true;
+            createNote();
+            gameLoop(0);
+            document.getElementById('startButton').style.display = 'none'; // 버튼 숨기기
+        }
+
+        // 게임 시작 버튼
+        const startButton = document.createElement('button');
+        startButton.id = 'startButton';
+        startButton.textContent = '게임 시작';
+        document.body.appendChild(startButton);
+
+        startButton.addEventListener('click', () => {
+            startGame();
+        });
+    </script>
+</body>
+</html>
